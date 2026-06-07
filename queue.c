@@ -18,24 +18,16 @@ struct list_head *q_new()
 /* Free all storage used by queue */
 void q_free(struct list_head *head)
 {
-    if (!head || list_empty(head))
+    if (!head)
         return;
 
-    struct list_head *curr = head->next->next;
-
-    while (curr != head) {
-        if (curr->prev == head) {
-            break;
-        }
-        element_t *e = container_of(curr->prev, element_t, list);
-        list_del(curr->prev);
-        q_release_element(e);
-        curr = curr->next;
+    struct list_head *node, *safe;
+    list_for_each_safe(node, safe, head) {
+        list_del(node);
+        element_t *element = container_of(node, element_t, list);
+        free(element->value);
+        free(element);
     }
-    element_t *e = container_of(curr->prev, element_t, list);
-    list_del(curr->prev);
-    q_release_element(e);
-    list_del_init(head);
     free(head);
 }
 
@@ -74,6 +66,7 @@ bool q_insert_tail(struct list_head *head, char *s)
 
     element->value = malloc(strlen(s) + 1);
     if (!element->value) {
+        free(element);
         return false;
     }
     strncpy(element->value, s, strlen(s) + 1);
@@ -81,61 +74,46 @@ bool q_insert_tail(struct list_head *head, char *s)
     return true;
 }
 
+// sp 是呼叫者傳進來的緩衝區，用來帶走被移除元素的字串值。
 /* Remove an element from head of queue */
-// 不用free
 element_t *q_remove_head(struct list_head *head, char *sp, size_t bufsize)
 {
-    if (!head) {
+    if (!head || list_empty(head))
         return NULL;
+
+    element_t *elem = list_first_entry(head, element_t, list);
+    list_del(&elem->list);
+
+    if (sp && bufsize > 0) {
+        strncpy(sp, elem->value, bufsize - 1);
+        sp[bufsize - 1] = '\0';
     }
 
-    struct list_head *temp;
-
-    if (head->next != head) {
-        // 取第一個元素
-        element_t *element = list_first_entry(head, element_t, list);
-
-        temp = head->next;
-        head->next = temp->next;
-        temp->next->prev = head;
-
-        temp->prev = NULL;
-        temp->next = NULL;
-        return element;
-    }
-    return NULL;
+    return elem;
 }
 
 /* Remove an element from tail of queue */
 element_t *q_remove_tail(struct list_head *head, char *sp, size_t bufsize)
 {
-    if (!head) {
+    if (!head || list_empty(head)) {
         return NULL;
     }
 
-    struct list_head *temp;
+    element_t *e = list_last_entry(head, element_t, list);
+    list_del(&(e->list));
 
-    if (head->prev != head) {
-        // 取最後一個元素
-        element_t *element = list_last_entry(head, element_t, list);
-
-        temp = head->prev;
-        head->prev = temp->prev;
-        temp->prev->next = head;
-
-        temp->prev = NULL;
-        temp->next = NULL;
-
-        return element;
+    if (sp && bufsize > 0) {
+        strncpy(sp, e->value, bufsize - 1);
+        sp[bufsize - 1] = '\0';
     }
 
-    return NULL;
+    return e;
 }
 
 /* Return number of elements in queue */
 int q_size(struct list_head *head)
 {
-    if (!head) {
+    if (!head || list_empty(head)) {
         return 0;
     }
 
@@ -151,12 +129,17 @@ int q_size(struct list_head *head)
 bool q_delete_mid(struct list_head *head)
 {
     // https://leetcode.com/problems/delete-the-middle-node-of-a-linked-list/
-    if (!head) {
+    if (!head || list_empty(head)) {
         return false;
     }
-    int size = q_size(head);
-    int mid = (size - 1) / 2;
 
+    int size = q_size(head);
+    int mid = 0;
+    if (size % 2 != 0) {
+        mid = size / 2 + 1;
+    } else {
+        mid = size / 2;
+    }
 
     struct list_head *node, *safe;
 
@@ -164,10 +147,7 @@ bool q_delete_mid(struct list_head *head)
     list_for_each_safe(node, safe, head) {
         count++;
         if (count == mid) {
-            node->prev->next = safe;
-            safe->prev = node->prev;
-            node->next = NULL;
-            node->prev = NULL;
+            list_del(node);
             element_t *element = container_of(node, element_t, list);
             free(element->value);
             free(element);
@@ -202,14 +182,14 @@ bool q_delete_dup(struct list_head *head)
             element_t *re = container_of(run, element_t, list);
             struct list_head *run_next = run->next;
 
-            list_del(run);
-            q_release_element(re);
-
             // 確認再下一個點有一樣嗎
             bool same =
                 (run_next != head) &&
                 strcmp(re->value,
                        container_of(run_next, element_t, list)->value) == 0;
+            list_del(run);
+            q_release_element(re);
+
             run = run_next;
 
             // 下一個點不一樣，不刪
