@@ -3,7 +3,9 @@
 #include <string.h>
 
 #include "queue.h"
-
+static void merge_two_queues(struct list_head *l1,
+                             struct list_head *l2,
+                             bool descend);
 /* Create an empty queue */
 struct list_head *q_new()
 {
@@ -273,8 +275,7 @@ void q_swap(struct list_head *head)
     q_reverseK(head, 2);
 }
 
-/* Sort elements of queue in ascending/descending order */
-void q_sort(struct list_head *head, bool descend)
+void bubble_sort(struct list_head *head, bool descend)
 {
     if (!head || list_empty(head))
         return;
@@ -310,6 +311,44 @@ void q_sort(struct list_head *head, bool descend)
             curr = curr->next;
         }
     }
+}
+
+static void merge_sort(struct list_head *head, bool descend)
+{
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;
+
+    struct list_head *slow = head;
+    struct list_head *fast = head->next;
+
+    // 把list切兩半
+    while (fast != head && fast->next != head) {
+        slow = slow->next;
+        fast = fast->next->next;
+    }
+
+    struct list_head *fast_node = slow->next;
+    struct list_head *last_node = head->prev;
+
+    slow->next = head;
+    head->prev = slow;
+
+    LIST_HEAD(l2_head);
+    l2_head.next = fast_node;
+    fast_node->prev = &l2_head;
+    l2_head.prev = last_node;
+    last_node->next = &l2_head;
+
+    merge_sort(head, descend);
+    merge_sort(&l2_head, descend);
+
+    merge_two_queues(head, &l2_head, descend);
+}
+
+/* Sort elements of queue in ascending/descending order */
+void q_sort(struct list_head *head, bool descend)
+{
+    merge_sort(head, descend);
 }
 
 
@@ -398,7 +437,7 @@ static void merge_two_queues(struct list_head *l1,
         int cmp = strcmp(e1->value, e2->value);
         bool take_l2 = descend ? (cmp < 0) : (cmp > 0);
 
-        // 把l1或l2的第一個點，一到tmp暫存串列
+        // 把l1或l2的第一個點，移到tmp暫存串列
         list_move_tail(take_l2 ? l2->next : l1->next, &tmp);
     }
 
