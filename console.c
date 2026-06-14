@@ -58,6 +58,11 @@ static bool quit_flag = false;
 static char *prompt = "cmd> ";
 static bool has_infile = false;
 
+/* fd of the active HTTP client connection (0 when none). Set in web_eventmux()
+ * and read by report()/report_noreturn() (report.c) to stream output back.
+ */
+int web_connfd;
+
 /* Optional function to call as part of exit process */
 /* Maximum number of quit functions */
 
@@ -242,6 +247,15 @@ static bool interpret_cmd(char *cmdline)
         free_string(argv[i]);
     free_array(argv, argc, sizeof(char *));
 
+    /* If this command came from an HTTP request, its output has now been
+     * streamed back via report(); close the connection and clear the fd so
+     * subsequent console output is not sent to a stale socket.
+     */
+    if (web_connfd > 0) {
+        close(web_connfd);
+        web_connfd = 0;
+    }
+
     return ok;
 }
 
@@ -422,8 +436,11 @@ static bool do_web(int argc, char *argv[])
     web_fd = web_open(port);
     if (web_fd > 0) {
         printf("listen on port %d, fd is %d\n", port, web_fd);
+        /* Register the multiplexing callback so that line_edit() services both
+         * keyboard input and incoming HTTP connections via select(). Keep
+         * use_linenoise = true so the eventmux hook inside line_edit() runs.
+         */
         line_set_eventmux_callback(web_eventmux);
-        use_linenoise = false;
     } else {
         perror("ERROR");
         exit(web_fd);
@@ -572,7 +589,6 @@ static bool cmd_done(void)
  * nfds should be set to the maximum file descriptor for network sockets.
  * If nfds == 0, this indicates that there is no pending network activity
  */
-int web_connfd;
 static int cmd_select(int nfds,
                       fd_set *readfds,
                       fd_set *writefds,
@@ -674,6 +690,11 @@ bool run_console(char *infile_name)
 
     if (!has_infile) {
         char *cmdline;
+        /* use_linenoise stays true in the web-server flow (HTTP requests are
+         * serviced via the eventmux callback inside line_edit()); the legacy
+         * cmd_select() loop below is retained for non-linenoise builds.
+         */
+        /* cppcheck-suppress knownConditionTrueFalse */
         while (use_linenoise && (cmdline = linenoise(prompt))) {
             interpret_cmd(cmdline);
             line_history_add(cmdline);       /* Add to the history. */
@@ -683,6 +704,7 @@ bool run_console(char *infile_name)
                 cmd_select(0, NULL, NULL, NULL, NULL);
             has_infile = false;
         }
+        /* cppcheck-suppress knownConditionTrueFalse */
         if (!use_linenoise) {
             while (!cmd_done())
                 cmd_select(0, NULL, NULL, NULL, NULL);

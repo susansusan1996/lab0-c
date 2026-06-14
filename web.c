@@ -25,6 +25,11 @@
 
 static int server_fd;
 
+/* Defined in console.c. Holds the fd of the active HTTP client connection
+ * (0 when none), so report()/report_noreturn() can stream output back.
+ */
+extern int web_connfd;
+
 typedef struct {
     int fd;            /* descriptor for this buf */
     int count;         /* unread byte in this buf */
@@ -236,36 +241,64 @@ char *web_recv(int fd, struct sockaddr_in *clientaddr)
 
 int web_eventmux(char *buf, size_t buflen)
 {
-    fd_set listenset;
+    /* Loop so that socket events which do not yield a command (e.g. a favicon
+     * request) are handled here and we go back to select(), rather than
+     * returning 0 and letting line_edit() block on read(stdin) — which would
+     * stall the server until the next keypress.
+     */
+    while (1) {
+        fd_set listenset;
 
-    FD_ZERO(&listenset);
-    FD_SET(STDIN_FILENO, &listenset);
-    int max_fd = STDIN_FILENO;
-    if (server_fd > 0) {
-        FD_SET(server_fd, &listenset);
-        max_fd = max_fd > server_fd ? max_fd : server_fd;
+        FD_ZERO(&listenset);
+        FD_SET(STDIN_FILENO, &listenset);
+        int max_fd = STDIN_FILENO;
+        if (server_fd > 0) {
+            FD_SET(server_fd, &listenset);
+            max_fd = max_fd > server_fd ? max_fd : server_fd;
+        }
+        int result = select(max_fd + 1, &listenset, NULL, NULL, NULL);
+        if (result < 0)
+            return -1;
+
+        if (server_fd > 0 && FD_ISSET(server_fd, &listenset)) {
+            FD_CLR(server_fd, &listenset);
+            struct sockaddr_in clientaddr;
+            socklen_t clientlen = sizeof(clientaddr);
+            /* Store the connection fd globally so report()/report_noreturn()
+             * can stream the command output back to this HTTP client. It is
+             * closed after the command finishes (interpret_cmd() in console.c).
+             */
+            web_connfd =
+                accept(server_fd, (struct sockaddr *) &clientaddr, &clientlen);
+
+            char *p = web_recv(web_connfd, &clientaddr);
+
+            /* Browsers automatically request /favicon.ico, which would
+             * otherwise be fed to the interpreter as a bogus command. Answer it
+             * with 404 and keep waiting instead of treating it as a command.
+             */
+            if (strcmp(p, "favicon.ico") == 0) {
+                char *notfound =
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n"
+                    "Connection: close\r\n\r\n";
+                web_send(web_connfd, notfound);
+                free(p);
+                close(web_connfd);
+                web_connfd = 0;
+                continue;
+            }
+
+            char *buffer =
+                "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
+                "Connection: close\r\n\r\n";
+            web_send(web_connfd, buffer);
+            strncpy(buf, p, buflen - 1);
+            buf[buflen - 1] = '\0';
+            free(p);
+            return strlen(buf);
+        }
+
+        FD_CLR(STDIN_FILENO, &listenset);
+        return 0;
     }
-    int result = select(max_fd + 1, &listenset, NULL, NULL, NULL);
-    if (result < 0)
-        return -1;
-
-    if (server_fd > 0 && FD_ISSET(server_fd, &listenset)) {
-        FD_CLR(server_fd, &listenset);
-        struct sockaddr_in clientaddr;
-        socklen_t clientlen = sizeof(clientaddr);
-        int web_connfd =
-            accept(server_fd, (struct sockaddr *) &clientaddr, &clientlen);
-
-        char *p = web_recv(web_connfd, &clientaddr);
-        char *buffer = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n";
-        web_send(web_connfd, buffer);
-        strncpy(buf, p, buflen);
-        buf[buflen] = '\0';
-        free(p);
-        close(web_connfd);
-        return strlen(buf);
-    }
-
-    FD_CLR(STDIN_FILENO, &listenset);
-    return 0;
 }
