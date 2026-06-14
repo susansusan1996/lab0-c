@@ -47,6 +47,12 @@ extern int show_entropy;
 #include "console.h"
 #include "report.h"
 
+/* Non-standard helpers defined in queue.c for local testing. Declared here
+ * (not in queue.h) so the fixed queue.h interface is left untouched.
+ */
+void q_swapp(struct list_head *head, struct list_head *a, struct list_head *b);
+void q_shuffle(struct list_head *head);
+
 /* Settable parameters */
 
 #define HISTORY_LEN 20
@@ -738,6 +744,60 @@ static bool do_swap(int argc, char *argv[])
     return !error_check();
 }
 
+static bool do_swapp(int argc, char *argv[])
+{
+    if (argc != 3) {
+        report(1, "%s needs two indices: i j", argv[0]);
+        return false;
+    }
+    if (!current || !current->q) {
+        report(3, "Warning: Try to access null queue");
+        return false;
+    }
+    error_check();
+
+    int i = atoi(argv[1]);
+    int j = atoi(argv[2]);
+    int n = q_size(current->q);
+    if (i < 0 || j < 0 || i >= n || j >= n) {
+        report(1, "Indices out of range (queue size = %d)", n);
+        return false;
+    }
+
+    struct list_head *a = current->q->next, *b = current->q->next;
+    for (int k = 0; k < i; k++)
+        a = a->next;
+    for (int k = 0; k < j; k++)
+        b = b->next;
+
+    if (exception_setup(true))
+        q_swapp(current->q, a, b);
+    exception_cancel();
+
+    q_show(3);
+    return !error_check();
+}
+
+static bool do_shuffle(int argc, char *argv[])
+{
+    if (argc != 1) {
+        report(1, "%s takes no arguments", argv[0]);
+        return false;
+    }
+    if (!current || !current->q) {
+        report(3, "Warning: Calling shuffle on null queue");
+        return false;
+    }
+    error_check();
+
+    if (exception_setup(true))
+        q_shuffle(current->q);
+    exception_cancel();
+
+    q_show(3);
+    return !error_check();
+}
+
 
 static bool do_ascend(int argc, char *argv[])
 {
@@ -1105,6 +1165,8 @@ static void console_init(void)
     ADD_COMMAND(dedup, "Delete all nodes that have duplicate string", "");
     ADD_COMMAND(merge, "Merge all the queues into one sorted queue", "");
     ADD_COMMAND(swap, "Swap every two adjacent nodes in queue", "");
+    ADD_COMMAND(swapp, "Swap two nodes at 0-based indices i and j", "i j");
+    ADD_COMMAND(shuffle, "Randomly shuffle the nodes of the queue", "");
     ADD_COMMAND(ascend,
                 "Remove every node which has a node with a strictly less "
                 "value anywhere to the right side of it",

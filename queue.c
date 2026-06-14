@@ -372,6 +372,32 @@ void q_swapp(struct list_head *head, struct list_head *a, struct list_head *b)
 }
 
 
+/* Fisher-Yates shuffle. The unshuffled region is always the first `count`
+ * nodes, with `old` pointing at its tail. Each round we pick a random node in
+ * the region and swap it with the tail; after the swap the picked node sits at
+ * the tail slot, so curr->prev becomes the new tail for the next round.
+ */
+void q_shuffle(struct list_head *head)
+{
+    if (!head || list_empty(head) || list_is_singular(head))
+        return;
+
+    int count = q_size(head);
+    struct list_head *old = head->prev;
+
+    while (count > 1) {
+        struct list_head *curr = head->next;
+        int random = rand() % count; /* 0 .. count-1 */
+        for (int k = 0; k < random; k++)
+            curr = curr->next;
+
+        q_swapp(head, curr, old);
+        old = curr->prev;
+        count--;
+    }
+}
+
+
 
 int q_ascend(struct list_head *head)
 {
