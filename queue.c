@@ -351,6 +351,27 @@ void q_sort(struct list_head *head, bool descend)
     merge_sort(head, descend);
 }
 
+/* Swap two arbitrary nodes a and b in the list (they need not be adjacent). */
+void q_swapp(struct list_head *head, struct list_head *a, struct list_head *b)
+{
+    if (!a || !b || a == b)
+        return;
+
+    /* Use a temporary node as a placeholder so the adjacent / same-neighbour
+     * cases need no special handling: park a placeholder where a is, remove a,
+     * move a in front of b, remove b, then put b where the placeholder is and
+     * drop the placeholder.
+     */
+    struct list_head tmp;
+    list_add(&tmp, a); /* tmp goes right after a, marking a's region */
+    list_del(a);
+    list_add(a, b->prev);
+    list_del(b);
+    list_add(b, &tmp); /* b takes the slot right after tmp ... */
+    list_del(&tmp);    /* ... then remove the placeholder */
+}
+
+
 
 int q_ascend(struct list_head *head)
 {
