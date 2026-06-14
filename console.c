@@ -72,6 +72,12 @@ static void pop_file(void);
 
 static bool interpret_cmda(int argc, char *argv[]);
 
+bool do_hello(int argc, char *argv[])
+{
+    return (bool) printf("Hello, World\n");
+}
+
+
 /* Add a new command */
 void add_cmd(char *name, cmd_func_t operation, char *summary, char *param)
 {
@@ -434,6 +440,7 @@ void init_cmd(void)
     quit_flag = false;
 
     ADD_COMMAND(help, "Show summary", "");
+    ADD_COMMAND(hello, "Print hello message", "");
     ADD_COMMAND(option,
                 "Display or set options. See 'Options' section for details",
                 "[name val]");
